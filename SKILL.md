@@ -131,7 +131,9 @@ Only flag issues where:
 6. It doesn't rely on unstated assumptions
 7. You can identify provably affected code (no speculation)
 8. It's not an intentional change by the author
-9. Parameters represent the correct entities (not just correct types)
+9. Parameter correctness across the call stack:
+   a) Arguments represent the correct entities, not just matching types
+   b) If a parameter is added, removed, or ignored, check that callers reflect the same intent
 ```
 
 ### Comment Quality Guidelines (include in ALL agent prompts)
@@ -288,7 +290,9 @@ Bug Qualification Criteria:
 6. It doesn't rely on unstated assumptions
 7. You can identify provably affected code (no speculation)
 8. It's not an intentional change by the author
-9. Parameters represent the correct entities (not just correct types)
+9. Parameter correctness across the call stack:
+   a) Arguments represent the correct entities, not just matching types
+   b) If a parameter is added, removed, or ignored, check that callers reflect the same intent
 
 Comment Quality Guidelines:
 - Clearly explain WHY it's a problem
