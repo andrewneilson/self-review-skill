@@ -6,7 +6,7 @@ allowed-tools: AskUserQuestion Bash(git diff:*) Bash(git log:*) Bash(git branch:
 
 # Self-Review
 
-Perform local code review of git changes using parallel agents with Opus verification.
+Perform local code review of git changes using parallel agents with high-reasoning verification.
 
 ## Quick Start
 
@@ -20,6 +20,65 @@ Get current branch and recent branches for comparison:
 git branch --show-current
 git for-each-ref --sort=-committerdate --format='%(refname:short)' refs/heads/ | grep -v "$(git branch --show-current)" | head -3
 ```
+
+## Step 1.5: Model Configuration
+
+Check if running on a Claude model (Opus or Sonnet). You know your own model - if you are `claude-opus-*` or `claude-sonnet-*`, skip to Step 2 and use the defaults (haiku/sonnet/opus).
+
+If you are NOT a Claude model, ask 3 questions to configure the model tiers:
+
+### Question 1: Low-Reasoning Model
+
+```
+AskUserQuestion:
+- question: "Which model for low-reasoning tasks (CLAUDE.md/AGENTS.md discovery, summaries, scoring)?"
+- header: "Low Tier"
+- multiSelect: false
+- options:
+  - label: "haiku"
+    description: "Claude Haiku"
+  - label: "gpt-5.1-codex-mini"
+    description: "GPT 5.1 Codex Mini"
+  - label: "gpt-5.2-codex"
+    description: "GPT 5.2 Codex"
+```
+
+### Question 2: Medium-Reasoning Model
+
+```
+AskUserQuestion:
+- question: "Which model for medium-reasoning tasks (parallel review agents)?"
+- header: "Medium Tier"
+- multiSelect: false
+- options:
+  - label: "sonnet"
+    description: "Claude Sonnet 4.5"
+  - label: "gpt-5.2-codex"
+    description: "GPT 5.2 Codex"
+  - label: "gemini-3-pro-preview"
+    description: "Gemini 3 Pro Preview"
+```
+
+### Question 3: High-Reasoning Model
+
+```
+AskUserQuestion:
+- question: "Which model for high-reasoning tasks (final verification pass)?"
+- header: "High Tier"
+- multiSelect: false
+- options:
+  - label: "opus"
+    description: "Claude Opus 4.5"
+  - label: "gemini-3-pro-preview"
+    description: "Gemini 3 Pro Preview"
+  - label: "gpt-5.2-codex"
+    description: "GPT 5.2 Codex"
+```
+
+Store the responses as:
+- `<low-reasoning-model>` (default: haiku)
+- `<medium-reasoning-model>` (default: sonnet)
+- `<high-reasoning-model>` (default: opus)
 
 ## Step 2: Ask User Questions
 
@@ -107,17 +166,36 @@ Combine branch diff (using merge-base) with working changes.
 
 Also get changed files list for reference.
 
-## Step 4: Find CLAUDE.md Files
+## Step 4: Find CLAUDE.md and AGENTS.md Files
 
-Use a general-purpose agent with `model: "haiku"` to find relevant CLAUDE.md files in the repo root and modified directories. Read their contents.
+Use a general-purpose agent with `model: "<low-reasoning-model>"` to find relevant CLAUDE.md and AGENTS.md files in the repo root and modified directories. Read their contents.
 
 ## Step 5: Summarize Changes
 
-Use a general-purpose agent with `model: "haiku"` to create a 2-3 sentence summary of the changes.
+Use a general-purpose agent with `model: "<low-reasoning-model>"` to create a 2-3 sentence summary of the changes.
 
 ## Step 6: Multi-Agent Review
 
-Launch 4 parallel general-purpose agents with `model: "sonnet"` (single message with 4 Task calls).
+Launch 4 parallel general-purpose agents with `model: "<medium-reasoning-model>"` (single message with 4 Task calls).
+
+### Read-Only Mode (include in ALL agent prompts)
+
+```
+CRITICAL: This is a READ-ONLY code review task.
+
+DO NOT:
+- Edit, modify, or fix any code
+- Use the Edit, Write, or MultiEdit tools
+- Suggest applying fixes directly
+- Attempt to "help" by making changes
+
+DO:
+- Report findings in the specified output format
+- Describe issues and how to confirm them
+- Suggest fixes in the "fix_suggestion" field (text only)
+
+Your job is to REPORT, not REPAIR. Return structured findings only.
+```
 
 ### Bug Qualification Criteria (include in ALL agent prompts)
 
@@ -172,9 +250,9 @@ Each agent must tag findings with a category from:
 
 Note: `wrong-value` is for bugs where a parameter is provided but represents the wrong entity/data (correct type, wrong semantic meaning).
 
-### Agent 1: CLAUDE.md Compliance
+### Agent 1: CLAUDE.md/AGENTS.md Compliance
 
-Audit changes against CLAUDE.md guidelines. Only flag issues where guidelines EXPLICITLY mention the rule.
+Audit changes against CLAUDE.md and AGENTS.md guidelines. Only flag issues where guidelines EXPLICITLY mention the rule.
 
 ### Agent 2: Bug Detection
 
@@ -245,12 +323,12 @@ DO NOT merge based on title similarity alone.
 
 ## Step 7: Confidence Scoring (Ranking Only)
 
-Use general-purpose agents with `model: "haiku"` to score each candidate. This is ranking only - NO filtering at this step.
+Use general-purpose agents with `model: "<low-reasoning-model>"` to score each candidate. This is ranking only - NO filtering at this step.
 
 For each candidate:
 - Assign confidence 0-100 (likelihood it's real)
 - Do NOT filter any candidates
-- Pass full list to Opus
+- Pass full list to verifier
 
 Confidence scale:
 - 0-25: Likely false positive
@@ -258,16 +336,16 @@ Confidence scale:
 - 51-75: Probably real
 - 76-100: Almost certainly real
 
-## Step 8: Opus Full Review
+## Step 8: High-Reasoning Verification
 
-Launch a general-purpose agent with `model: "opus"` that receives:
+Launch a general-purpose agent with `model: "<high-reasoning-model>"` that receives:
 - Full diff with hunks (from Step 3) - not just filenames, the actual diff content
-- CLAUDE.md files (from Step 4)
+- CLAUDE.md/AGENTS.md files (from Step 4)
 - Ranked candidate list with confidence scores (from Step 7)
 
 ### Critical: Independent Diff Scan
 
-Opus must independently scan the entire diff, not just validate candidates. The candidate list is a starting point, not the universe of issues.
+The verifier must independently scan the entire diff, not just validate candidates. The candidate list is a starting point, not the universe of issues.
 
 ### Large Diff Handling
 
@@ -276,10 +354,13 @@ If diff exceeds context limits (~100k tokens), chunk by file:
 - Include "highest-risk" files (security-related, core logic) even without candidates
 - **Required:** If any files were skipped, output must include a list of skipped files
 
-### Opus Prompt Instructions
+### Verifier Prompt Instructions
 
 ```
 You are performing a final verification pass on code review findings.
+
+CRITICAL: This is a READ-ONLY review task. Do NOT edit, modify, or fix any code.
+Do NOT use Edit, Write, or MultiEdit tools. Report findings only - do not repair.
 
 Bug Qualification Criteria:
 1. It meaningfully impacts accuracy, performance, security, or maintainability
@@ -352,11 +433,11 @@ For each function call in the diff where arguments are passed:
 
 ### Filter Rules
 
-After Opus review:
+After verification review:
 - **verified: true** (any confidence): Show in Verified Findings, contribute to verdict
 - **verified: unsure** + confidence ≥50: Show in Tentative Findings (doesn't affect verdict)
 - **verified: unsure** + confidence <50: Filter out
-- **verified: false**: Filter out (rejected by Opus)
+- **verified: false**: Filter out (rejected by verifier)
 
 ### Output Ordering
 
@@ -397,7 +478,7 @@ After Opus review:
 
 ---
 
-## Tentative Findings (Opus unsure, confidence ≥50%)
+## Tentative Findings (verifier unsure, confidence ≥50%)
 
 ### 1. [P2] Uncertain issue (confidence: 55%)
 **File:** path/to/file.ext:20-25
@@ -441,7 +522,7 @@ No verified findings.
 
 ---
 
-## Tentative Findings (Opus unsure, confidence ≥50%)
+## Tentative Findings (verifier unsure, confidence ≥50%)
 
 No tentative findings.
 ```
