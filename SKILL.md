@@ -109,15 +109,15 @@ Also get changed files list for reference.
 
 ## Step 4: Find CLAUDE.md Files
 
-Use a Haiku agent to find relevant CLAUDE.md files in the repo root and modified directories. Read their contents.
+Use a general-purpose agent with `model: "haiku"` to find relevant CLAUDE.md files in the repo root and modified directories. Read their contents.
 
 ## Step 5: Summarize Changes
 
-Use a Haiku agent to create a 2-3 sentence summary of the changes.
+Use a general-purpose agent with `model: "haiku"` to create a 2-3 sentence summary of the changes.
 
 ## Step 6: Multi-Agent Review
 
-Launch 4 parallel Sonnet agents (single message with 4 Task calls).
+Launch 4 parallel general-purpose agents with `model: "sonnet"` (single message with 4 Task calls).
 
 ### Bug Qualification Criteria (include in ALL agent prompts)
 
@@ -243,7 +243,7 @@ DO NOT merge based on title similarity alone.
 
 ## Step 7: Confidence Scoring (Ranking Only)
 
-Use Haiku agents to score each candidate. This is ranking only - NO filtering at this step.
+Use general-purpose agents with `model: "haiku"` to score each candidate. This is ranking only - NO filtering at this step.
 
 For each candidate:
 - Assign confidence 0-100 (likelihood it's real)
@@ -258,7 +258,7 @@ Confidence scale:
 
 ## Step 8: Opus Full Review
 
-Launch an Opus agent that receives:
+Launch a general-purpose agent with `model: "opus"` that receives:
 - Full diff with hunks (from Step 3) - not just filenames, the actual diff content
 - CLAUDE.md files (from Step 4)
 - Ranked candidate list with confidence scores (from Step 7)
