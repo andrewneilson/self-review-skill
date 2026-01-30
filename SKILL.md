@@ -186,15 +186,17 @@ CRITICAL: This is a READ-ONLY code review task.
 DO NOT:
 - Edit, modify, or fix any code
 - Use the Edit, Write, or MultiEdit tools
+- Write files to /tmp/ or any other location
 - Suggest applying fixes directly
 - Attempt to "help" by making changes
 
 DO:
 - Report findings in the specified output format
+- Return all output as markdown text in your response (not as files)
 - Describe issues and how to confirm them
 - Suggest fixes in the "fix_suggestion" field (text only)
 
-Your job is to REPORT, not REPAIR. Return structured findings only.
+Your job is to REPORT, not REPAIR. Return structured findings as markdown text only.
 ```
 
 ### Bug Qualification Criteria (include in ALL agent prompts)
@@ -441,7 +443,7 @@ After verification review:
 
 ### Output Ordering
 
-- Verified findings: Sort by priority (P0→P3), then confidence (high→low)
+- Verified findings: Sort by decreasing severity (P0 first, then P1, P2, P3), then by confidence (high→low)
 - Tentative findings: Sort by confidence (high→low)
 
 ### Output Format
