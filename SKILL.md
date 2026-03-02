@@ -1,7 +1,7 @@
 ---
 name: self-review
 description: Local code review comparing branches/diffs without GitHub integration. Use when the user wants to review their code, self-review changes, check for bugs before committing, or mentions code review, diff review, or branch comparison.
-allowed-tools: AskUserQuestion Bash(git diff:*) Bash(git log:*) Bash(git branch:*) Bash(git blame:*) Bash(git show:*) Bash(git for-each-ref:*) Bash(git rev-parse:*) Bash(git status:*) Bash(git ls-files:*) Bash(git cat-file:*) Bash(git merge-base:*) Bash(grep:*) Bash(head:*) Bash(wc:*) Read Glob Grep Task
+allowed-tools: AskUserQuestion shell(git diff:*) shell(git log:*) shell(git branch:*) shell(git blame:*) shell(git show:*) shell(git for-each-ref:*) shell(git rev-parse:*) shell(git status:*) shell(git ls-files:*) shell(git cat-file:*) shell(git merge-base:*) shell(git diff:*) shell(git log:*) shell(git branch:*) shell(git blame:*) shell(git show:*) shell(git for-each-ref:*) shell(git rev-parse:*) shell(git status:*) shell(git ls-files:*) shell(git cat-file:*) shell(git merge-base:*) Read Glob Grep Task
 ---
 
 # Self-Review
@@ -18,67 +18,39 @@ Get current branch and recent branches for comparison:
 
 ```bash
 git branch --show-current
-git for-each-ref --sort=-committerdate --format='%(refname:short)' refs/heads/ | grep -v "$(git branch --show-current)" | head -3
 ```
 
-## Step 1.5: Model Configuration
-
-Check if running on a Claude model (Opus or Sonnet). You know your own model - if you are `claude-opus-*` or `claude-sonnet-*`, skip to Step 2 and use the defaults (haiku/sonnet/opus).
-
-If you are NOT a Claude model, ask 3 questions to configure the model tiers:
-
-### Question 1: Low-Reasoning Model
-
-```
-AskUserQuestion:
-- question: "Which model for low-reasoning tasks (CLAUDE.md/AGENTS.md discovery, summaries, scoring)?"
-- header: "Low Tier"
-- multiSelect: false
-- options:
-  - label: "haiku"
-    description: "Claude Haiku"
-  - label: "gpt-5.1-codex-mini"
-    description: "GPT 5.1 Codex Mini"
-  - label: "gpt-5.2-codex"
-    description: "GPT 5.2 Codex"
+```bash
+git for-each-ref --sort=-committerdate --format='%(refname:short)' refs/heads/
 ```
 
-### Question 2: Medium-Reasoning Model
+From the second command's output, filter out the current branch and take the first 3 remaining branches. Do this filtering in your logic, not with shell pipes.
+
+## Step 1.5: High-Reasoning Model Selection
+
+You know your own model ID. If you are a Claude model (`claude-*`), skip this step and use `opus` as `<high-reasoning-model>`.
+
+If you are NOT a Claude model, ask the user:
 
 ```
 AskUserQuestion:
-- question: "Which model for medium-reasoning tasks (parallel review agents)?"
-- header: "Medium Tier"
-- multiSelect: false
-- options:
-  - label: "sonnet"
-    description: "Claude Sonnet 4.5"
-  - label: "gpt-5.2-codex"
-    description: "GPT 5.2 Codex"
-  - label: "gemini-3-pro-preview"
-    description: "Gemini 3 Pro Preview"
-```
-
-### Question 3: High-Reasoning Model
-
-```
-AskUserQuestion:
-- question: "Which model for high-reasoning tasks (final verification pass)?"
-- header: "High Tier"
+- question: "Which model for the high-reasoning verification pass?"
+- header: "Verifier"
 - multiSelect: false
 - options:
   - label: "opus"
-    description: "Claude Opus 4.5"
-  - label: "gemini-3-pro-preview"
-    description: "Gemini 3 Pro Preview"
-  - label: "gpt-5.2-codex"
-    description: "GPT 5.2 Codex"
+    description: "Claude Opus 4.5 (Recommended)"
+  - label: "gpt-5.2-codex-xhigh"
+    description: "GPT 5.2 Codex (xhigh reasoning)"
+  - label: "gpt-5.2-codex-high"
+    description: "GPT 5.2 Codex (high reasoning)"
+  - label: "gemini-3-pro"
+    description: "Gemini 3 Pro"
 ```
 
-Store the responses as:
-- `<low-reasoning-model>` (default: haiku)
-- `<medium-reasoning-model>` (default: sonnet)
-- `<high-reasoning-model>` (default: opus)
+Store the response as `<high-reasoning-model>`.
+
+Low and medium reasoning tasks always use Claude Haiku and Sonnet.
 
 ## Step 2: Ask User Questions
 
@@ -120,63 +92,65 @@ AskUserQuestion:
 
 ## Step 3: Gather the Diff
 
-Based on selections:
+Based on selections, run simple individual commands. Handle fallback logic in your decision-making, not shell scripts.
 
 ### For Branch commits (compare against base branch):
 
+1. Get the merge-base:
 ```bash
-# Try merge-base with specified branch
-MERGE_BASE=$(git merge-base <base-branch> HEAD 2>/dev/null)
+git merge-base <base-branch> HEAD
+```
 
-# Fallback 1: use base branch's upstream
-if [ -z "$MERGE_BASE" ]; then
-  BASE_UPSTREAM=$(git rev-parse --abbrev-ref "<base-branch>@{upstream}" 2>/dev/null)
-  if [ -n "$BASE_UPSTREAM" ]; then
-    MERGE_BASE=$(git merge-base $BASE_UPSTREAM HEAD 2>/dev/null)
-  fi
-fi
+2. If merge-base succeeds (returns a commit hash), use it for the diff:
+```bash
+git diff <merge-base-result>..HEAD
+```
 
-# Fallback 2: direct diff with warning
-if [ -z "$MERGE_BASE" ]; then
-  echo "Warning: Could not compute merge-base, using direct diff"
-  git diff <base-branch>..HEAD
-else
-  git diff $MERGE_BASE..HEAD
-fi
+3. If merge-base fails or returns empty, fall back to direct diff:
+```bash
+git diff <base-branch>..HEAD
+```
+
+4. Get the list of changed files (using same comparison):
+```bash
+git diff --name-only <merge-base-result>..HEAD
 ```
 
 ### For Working changes (staged + unstaged + untracked):
 
+Run these commands separately:
+
 ```bash
-# Staged changes
 git diff --cached
-
-# Unstaged changes
-git diff
-
-# Untracked files (for diff-overlap purposes)
-git ls-files -z --others --exclude-standard | while IFS= read -r -d '' file; do
-  git diff --no-index /dev/null "$file"
-done
 ```
+
+```bash
+git diff
+```
+
+```bash
+git ls-files --others --exclude-standard
+```
+
+For untracked files from the last command, read their contents using the Read tool (they're new files, so the entire file is the "diff").
 
 ### For Both:
 
-Combine branch diff (using merge-base) with working changes.
-
-Also get changed files list for reference.
+Combine branch diff with working changes. Run the commands separately as listed above.
 
 ## Step 4: Find CLAUDE.md and AGENTS.md Files
 
-Use a general-purpose agent with `model: "<low-reasoning-model>"` to find relevant CLAUDE.md and AGENTS.md files in the repo root and modified directories. Read their contents.
+Use an Explore agent with `model: "<low-reasoning-model>"` to:
+1. Use Glob tool with patterns `**/CLAUDE.md` and `**/AGENTS.md` to find guidance files
+2. Read contents of found files, prioritizing repo root and directories containing changed files
 
 ## Step 5: Summarize Changes
 
-Use a general-purpose agent with `model: "<low-reasoning-model>"` to create a 2-3 sentence summary of the changes.
+Use an Explore agent with `model: "<low-reasoning-model>"` to create a 2-3 sentence summary of the changes.
 
 ## Step 6: Multi-Agent Review
 
-Launch 4 parallel general-purpose agents with `model: "<medium-reasoning-model>"` (single message with 4 Task calls).
+Launch 5 parallel Explore agents with `model: "<medium-reasoning-model>"` and thoroughness "very thorough" (single message with 5 Task calls). Use `subagent_type: "Explore"` to ensure agents cannot access Edit/Write tools.
 
 ### Read-Only Mode (include in ALL agent prompts)
 
@@ -199,7 +173,7 @@ DO:
 Your job is to REPORT, not REPAIR. Return structured findings as markdown text only.
 ```
 
-### Bug Qualification Criteria (include in ALL agent prompts)
+### Bug Qualification Criteria (include in Agents 1-4 prompts)
 
 ```
 Only flag issues where:
@@ -214,6 +188,23 @@ Only flag issues where:
 9. Parameter correctness across the call stack:
    a) Arguments represent the correct entities, not just matching types
    b) If a parameter is added, removed, or ignored, check that callers reflect the same intent
+```
+
+### Design Finding Criteria (include in Agent 5 prompt)
+
+```
+Only flag design issues where:
+1. It meaningfully impacts maintainability, readability, or evolvability
+2. The issue is discrete and actionable (one clear recommendation per finding)
+3. The concern was introduced or materially worsened by this diff
+4. The author would likely agree it's worth addressing (not a subjective preference)
+5. A concrete alternative exists (even if details are left to the author)
+6. The scale of the issue warrants flagging -- minor imperfections are not findings
+7. For duplication: both sides are identifiable, and the repeated structure is
+   substantial enough that extraction would be an improvement
+8. For naming: the current name actively misleads, not merely "could be better"
+9. For excessive responsibility: the concerns are genuinely unrelated, not just
+   "a lot of code doing one complex thing"
 ```
 
 ### Comment Quality Guidelines (include in ALL agent prompts)
@@ -243,14 +234,24 @@ For multi-file issues (e.g., missing tests, contract changes):
 - Primary file MUST still overlap the diff
 - List related files in the explanation body
 - Use category tag "cross-cutting"
+
+For duplication findings:
+- The primary file/line range must overlap the diff
+- The second instance may be pre-existing (not in the diff)
+  as long as the diff introduces or extends the duplicated code
+- List both file locations in the explanation body
 ```
 
 ### Required Category Tag
 
 Each agent must tag findings with a category from:
-`null-pointer | buffer-overflow | integer-overflow | race-condition | resource-leak | logic-error | security | missing-test | type-error | api-misuse | wrong-value | cross-cutting | other`
+`null-pointer | buffer-overflow | integer-overflow | race-condition | resource-leak | logic-error | security | missing-test | type-error | api-misuse | wrong-value | cross-cutting | naming | duplication | excessive-responsibility | other`
 
 Note: `wrong-value` is for bugs where a parameter is provided but represents the wrong entity/data (correct type, wrong semantic meaning).
+
+Design categories: `naming` is for identifiers that mislead about behavior or scope.
+`duplication` is for substantial repeated logic that should be shared.
+`excessive-responsibility` is for units handling multiple unrelated concerns.
 
 ### Agent 1: CLAUDE.md/AGENTS.md Compliance
 
@@ -291,6 +292,23 @@ Use `git blame` and `git log` to identify issues informed by history (reverted f
 
 Check that changes comply with inline code comments (TODOs, warnings, documentation).
 
+### Agent 5: Design & Organization
+
+Review changes for design and organizational concerns. Include the Design Finding Criteria (not Bug Qualification Criteria) in this agent's prompt.
+
+Focus areas:
+
+- **Naming clarity**: Identifiers whose names actively mislead about behavior or scope. Not "could be slightly better" names -- names where the implied abstraction differs materially from actual behavior.
+- **Significant duplication**: Substantial blocks (~20+ lines) of repeated logic across files indicating a missing shared abstraction. Must identify both sides concretely.
+- **Excessive responsibility**: A single file/class/function handling multiple unrelated concerns. Threshold scales with complexity (50-line file with two related concerns is fine).
+
+Constraints:
+- Only flag issues introduced or significantly worsened by this diff
+- Diff-overlap requirement applies
+- Don't flag stylistic preferences (brace style, import ordering)
+- Don't flag trivially short files/functions
+- Duplication in test files is lower priority than production code
+
 ### Agent Output Format
 
 Each agent returns issues in format:
@@ -325,7 +343,7 @@ DO NOT merge based on title similarity alone.
 
 ## Step 7: Confidence Scoring (Ranking Only)
 
-Use general-purpose agents with `model: "<low-reasoning-model>"` to score each candidate. This is ranking only - NO filtering at this step.
+Use Explore agents with `model: "<low-reasoning-model>"` to score each candidate. This is ranking only - NO filtering at this step.
 
 For each candidate:
 - Assign confidence 0-100 (likelihood it's real)
@@ -340,7 +358,7 @@ Confidence scale:
 
 ## Step 8: High-Reasoning Verification
 
-Launch a general-purpose agent with `model: "<high-reasoning-model>"` that receives:
+Launch an Explore agent with `model: "<high-reasoning-model>"` and thoroughness "very thorough" that receives (use `subagent_type: "Explore"` to prevent edit attempts):
 - Full diff with hunks (from Step 3) - not just filenames, the actual diff content
 - CLAUDE.md/AGENTS.md files (from Step 4)
 - Ranked candidate list with confidence scores (from Step 7)
@@ -364,7 +382,7 @@ You are performing a final verification pass on code review findings.
 CRITICAL: This is a READ-ONLY review task. Do NOT edit, modify, or fix any code.
 Do NOT use Edit, Write, or MultiEdit tools. Report findings only - do not repair.
 
-Bug Qualification Criteria:
+Bug Qualification Criteria (for correctness categories):
 1. It meaningfully impacts accuracy, performance, security, or maintainability
 2. The issue is discrete and actionable (not general or compound)
 3. It matches the rigor level present in the codebase
@@ -377,6 +395,22 @@ Bug Qualification Criteria:
    a) Arguments represent the correct entities, not just matching types
    b) If a parameter is added, removed, or ignored, check that callers reflect the same intent
 
+Design Finding Criteria (for design categories: naming, duplication, excessive-responsibility):
+1. It meaningfully impacts maintainability, readability, or evolvability
+2. The issue is discrete and actionable (one clear recommendation per finding)
+3. The concern was introduced or materially worsened by this diff
+4. The author would likely agree it's worth addressing (not a subjective preference)
+5. A concrete alternative exists (even if details are left to the author)
+6. The scale of the issue warrants flagging -- minor imperfections are not findings
+7. For duplication: both sides are identifiable, and the repeated structure is
+   substantial enough that extraction would be an improvement
+8. For naming: the current name actively misleads, not merely "could be better"
+9. For excessive responsibility: the concerns are genuinely unrelated, not just
+   "a lot of code doing one complex thing"
+
+Apply Bug Qualification for correctness categories. Apply Design Finding for
+design categories (naming, duplication, excessive-responsibility).
+
 Comment Quality Guidelines:
 - Clearly explain WHY it's a problem
 - Communicate severity accurately (don't exaggerate)
@@ -388,22 +422,29 @@ Comment Quality Guidelines:
 - Include "How to confirm" with specific steps
 
 TASK 1: Review all candidates, marking each verified: true/false/unsure
-- true: Confirms this is a real bug per the 9 criteria
+- true: Confirms this is a real finding per the applicable criteria set
 - false: Rejects as false positive or pre-existing; set confidence: 0
 - unsure: Can't conclusively verify; may adjust confidence up/down
 
 TASK 2: Set confidence for ALL findings (0 for rejected, assessed value for others)
 
 TASK 3: Independently scan the full diff for issues not in the candidate list
+- Scan for both correctness bugs AND design concerns (naming, duplication, excessive responsibility)
 - New findings may REPLACE lower-quality candidates if they cover the same issue better
 - All new findings must also have verified status
 - Apply systematic wrong-value detection (see below)
 
 TASK 4: Assign priority based on IMPACT (not confidence)
+Correctness priority:
 - P0: Drop everything. Blocking. Universal, assumption-free.
 - P1: Urgent. Address in next cycle.
 - P2: Normal. Fix eventually.
 - P3: Low. Nice to have.
+Design priority:
+- P0: Not applicable for design findings (no runtime failures)
+- P1: Significant ongoing maintenance burden if not addressed before merge
+- P2: Worth addressing but mergeable with follow-up
+- P3: Minor organizational improvement
 
 TASK 5: Assign required category tag for each finding
 
@@ -475,8 +516,9 @@ After verification review:
 
 ---
 
-**Verdict:** Patch is [correct/incorrect]
-**Explanation:** [1-2 sentence justification]
+**Correctness:** Patch is [correct/incorrect]
+**Design:** [clean/has concerns]
+**Explanation:** [1-2 sentence justification covering both]
 
 ---
 
@@ -496,10 +538,14 @@ After verification review:
 
 ### Verdict Rules
 
-- "incorrect" if ANY verified bug exists (any priority level)
+- **Correctness**: "incorrect" if ANY verified correctness finding exists (any priority level)
+  - Correctness categories: all categories except `naming`, `duplication`, `excessive-responsibility`
+- **Design**: "has concerns" if ANY verified design finding exists
+  - Design categories: `naming`, `duplication`, `excessive-responsibility`
 - If files were skipped due to size:
-  - Verdict: "correct (with skipped files)" if no verified bugs
+  - Correctness: "correct (with skipped files)" if no verified correctness bugs
   - Explanation MUST list which files weren't reviewed
+  - Skipped-files caveat applies to correctness only
 - Tentative Findings section still appears even if Verified Findings is empty
 
 ### No-Findings Output
@@ -519,7 +565,8 @@ No verified findings.
 
 ---
 
-**Verdict:** Patch is correct
+**Correctness:** Patch is correct
+**Design:** clean
 **Explanation:** No issues met verification criteria.
 
 ---
